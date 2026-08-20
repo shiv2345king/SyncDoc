@@ -23,11 +23,13 @@ export function BlockWrapper({
   onOpenConflict,
   onOpenAstInspector,
   onUpdateBlock,
+  presencePeers = [],
   children
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [showTypeMenu, setShowTypeMenu] = useState(false);
 
+  const activePeer = presencePeers.find(p => p.cursorBlockId === block.id);
   const isConflict = Boolean(block.conflict);
 
   const blockTypeLabels = {
@@ -101,6 +103,14 @@ export function BlockWrapper({
 
       {/* Main Block Content Area */}
       <div className="block-main-content">
+        {/* Active Peer Presence Cursor Indicator */}
+        {activePeer && (
+          <div className="peer-cursor-badge" style={{ backgroundColor: activePeer.color || '#6366f1' }}>
+            <span className="cursor-dot" />
+            <span>{activePeer.name} is editing...</span>
+          </div>
+        )}
+
         {/* Top Block Info Bar */}
         <div className="block-info-bar">
           <div className="block-type-badge">
