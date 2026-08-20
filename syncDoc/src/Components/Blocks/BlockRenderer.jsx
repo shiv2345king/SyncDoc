@@ -18,7 +18,8 @@ export function BlockRenderer({
   onMoveDown,
   onInsertAfter,
   onOpenConflict,
-  onOpenAstInspector
+  onOpenAstInspector,
+  presencePeers = []
 }) {
   const isSelected = selectedBlockId === block.id;
 
@@ -69,6 +70,7 @@ export function BlockRenderer({
       onOpenConflict={onOpenConflict}
       onOpenAstInspector={onOpenAstInspector}
       onUpdateBlock={onUpdateBlock}
+      presencePeers={presencePeers}
     >
       {renderBlockContent()}
     </BlockWrapper>
