@@ -8,10 +8,12 @@ import {
   Plus,
   Split,
   Code,
-  Users,
   Sun,
-  Moon
+  Moon,
+  Activity
 } from 'lucide-react';
+import { YjsConnectionStatus } from '../Collaboration/YjsConnectionStatus';
+import { UserPresenceBar } from '../Collaboration/UserPresenceBar';
 
 export function DocumentHeader({
   document,
@@ -22,7 +24,15 @@ export function DocumentHeader({
   viewMode,
   onViewModeChange,
   isDarkMode,
-  onToggleTheme
+  onToggleTheme,
+  yjsStatus,
+  yjsClientId,
+  presenceUsers = [],
+  onSimulatePeer,
+  onReconnectYjs,
+  onDisconnectYjs,
+  showCollabState,
+  onToggleCollabState
 }) {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleText, setTitleText] = useState(document?.title || '');
@@ -76,6 +86,20 @@ export function DocumentHeader({
 
         {/* Sync Status Badge & Action Shortcuts */}
         <div className="header-status-and-collabs">
+          <YjsConnectionStatus
+            status={yjsStatus}
+            roomName={document.id}
+            clientId={yjsClientId}
+            onReconnect={onReconnectYjs}
+            onDisconnect={onDisconnectYjs}
+          />
+
+          <UserPresenceBar
+            presenceUsers={presenceUsers}
+            onSimulatePeer={onSimulatePeer}
+            activeDocBlocks={document.ast?.children}
+          />
+
           {hasConflict ? (
             <button
               type="button"
@@ -94,22 +118,15 @@ export function DocumentHeader({
             </div>
           )}
 
-          {/* Collaborator Avatars */}
-          <div className="collaborators-container">
-            <Users size={14} className="collab-icon" />
-            <div className="avatar-stack">
-              {document.collaborators?.map((c) => (
-                <img
-                  key={c.id}
-                  src={c.avatar}
-                  alt={c.name}
-                  title={`${c.name} (Active in document)`}
-                  className="collaborator-avatar"
-                  style={{ borderColor: c.color }}
-                />
-              ))}
-            </div>
-          </div>
+          <button
+            type="button"
+            className={`collab-dashboard-toggle-btn ${showCollabState ? 'active' : ''}`}
+            onClick={onToggleCollabState}
+            title="Toggle Yjs Collaborative Dashboard"
+          >
+            <Activity size={16} />
+            <span>Dashboard</span>
+          </button>
 
           {/* Theme Toggle */}
           <button
