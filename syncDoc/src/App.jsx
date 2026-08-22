@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { INITIAL_DOCUMENTS } from './models/sampleData';
+import { yjsService } from './services/yjsService';
 import { DocumentSidebar } from './Components/Sidebar/DocumentSidebar';
 import { DocumentHeader } from './Components/Header/DocumentHeader';
 import { BlockRenderer } from './Components/Blocks/BlockRenderer';
@@ -8,6 +9,7 @@ import { ConflictResolverModal } from './Components/ConflictResolver/ConflictRes
 import { ASTInspectorModal } from './Components/ASTViewer/ASTInspectorModal';
 import { NewBlockModal } from './Components/NewBlockModal';
 import { DocumentGridView } from './Components/DocumentBrowser/DocumentGridView';
+import { CollaborativeStatePanel } from './Components/Collaboration/CollaborativeStatePanel';
 import './App.css';
 
 function App() {
@@ -17,6 +19,34 @@ function App() {
   const [activeFilter, setActiveFilter] = useState('all');
   const [viewMode, setViewMode] = useState('split'); // 'editor' | 'split' | 'ast-tree' | 'grid'
   const [isDarkMode, setIsDarkMode] = useState(false);
+
+  // Yjs Collaboration & Presence State
+  const [yjsStatus, setYjsStatus] = useState('disconnected');
+  const [yjsClientId, setYjsClientId] = useState(0);
+  const [presenceUsers, setPresenceUsers] = useState([
+    {
+      id: 'local-1',
+      name: 'Alex Rivers (You)',
+      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
+      color: '#6366f1',
+      cursorBlockId: null
+    },
+    {
+      id: 'peer-2',
+      name: 'Elena Rostova',
+      avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&auto=format&fit=crop&q=80',
+      color: '#ec4899',
+      cursorBlockId: 'blk-105'
+    },
+    {
+      id: 'peer-3',
+      name: 'Marcus Chen',
+      avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&auto=format&fit=crop&q=80',
+      color: '#10b981',
+      cursorBlockId: 'blk-108'
+    }
+  ]);
+  const [showCollabState, setShowCollabState] = useState(false);
 
   // Modals
   const [activeConflictBlock, setActiveConflictBlock] = useState(null);
@@ -33,7 +63,59 @@ function App() {
     }
   }, [isDarkMode]);
 
-  // Document Handlers
+  // Connect client to Yjs WebSocket on active doc change
+  useEffect(() => {
+    yjsService.connect(activeDocId);
+
+    const unsubStatus = yjsService.onStatusChange(status => {
+      setYjsStatus(status);
+      setYjsClientId(yjsService.getClientId());
+    });
+
+    const unsubPresence = yjsService.onPresenceChange(states => {
+      if (states && states.length > 0) {
+        setPresenceUsers(states);
+      }
+    });
+
+    return () => {
+      unsubStatus();
+      unsubPresence();
+      yjsService.disconnect();
+    };
+  }, [activeDocId]);
+
+  // Sync active document AST blocks to Yjs
+  useEffect(() => {
+    if (activeDoc?.ast?.children) {
+      yjsService.syncBlocksToYjs(activeDoc.ast.children);
+    }
+  }, [activeDocId, activeDoc?.ast?.children]);
+
+  // Peer Presence Simulation
+  const handleSimulatePeer = (blocks) => {
+    const peerNames = ['Sarah Jenkins', 'David Kim', 'Amara Okafor', 'Liam Vance'];
+    const peerAvatars = [
+      'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=100&auto=format&fit=crop&q=80',
+      'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100&auto=format&fit=crop&q=80',
+      'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=100&auto=format&fit=crop&q=80',
+      'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=100&auto=format&fit=crop&q=80'
+    ];
+    const peerColors = ['#f59e0b', '#8b5cf6', '#06b6d4', '#f43f5e'];
+
+    const randomIndex = Math.floor(Math.random() * peerNames.length);
+    const targetBlock = blocks && blocks.length > 0 ? blocks[Math.floor(Math.random() * blocks.length)] : null;
+
+    const simulatedPeer = {
+      id: `sim-${Date.now()}`,
+      name: peerNames[randomIndex],
+      avatar: peerAvatars[randomIndex],
+      color: peerColors[randomIndex],
+      cursorBlockId: targetBlock ? targetBlock.id : null
+    };
+
+    setPresenceUsers(prev => [...prev.filter(p => p.id !== simulatedPeer.id), simulatedPeer]);
+  };
   const handleSelectDoc = (id) => {
     setActiveDocId(id);
     setSelectedBlockId(null);
@@ -318,7 +400,27 @@ function App() {
               onViewModeChange={setViewMode}
               isDarkMode={isDarkMode}
               onToggleTheme={() => setIsDarkMode(!isDarkMode)}
+              yjsStatus={yjsStatus}
+              yjsClientId={yjsClientId}
+              presenceUsers={presenceUsers}
+              onSimulatePeer={handleSimulatePeer}
+              onReconnectYjs={() => yjsService.connect(activeDocId)}
+              onDisconnectYjs={() => yjsService.disconnect()}
+              showCollabState={showCollabState}
+              onToggleCollabState={() => setShowCollabState(!showCollabState)}
             />
+
+            {showCollabState && (
+              <CollaborativeStatePanel
+                status={yjsStatus}
+                roomName={activeDocId}
+                clientId={yjsClientId}
+                presenceUsers={presenceUsers}
+                activeDoc={activeDoc}
+                onSimulatePeer={handleSimulatePeer}
+                onReconnect={() => yjsService.connect(activeDocId)}
+              />
+            )}
 
             <div className="sync-canvas-container">
               {/* Document Editor Canvas */}
@@ -330,7 +432,10 @@ function App() {
                         key={block.id}
                         block={block}
                         selectedBlockId={selectedBlockId}
-                        onSelectBlock={setSelectedBlockId}
+                        onSelectBlock={(id) => {
+                          setSelectedBlockId(id);
+                          yjsService.updateLocalPresence({ cursorBlockId: id });
+                        }}
                         onUpdateBlock={handleUpdateBlock}
                         onDeleteBlock={handleDeleteBlock}
                         onMoveUp={(id) => handleMoveBlock(id, 'up')}
@@ -338,6 +443,7 @@ function App() {
                         onInsertAfter={(id) => handleAddBlock('paragraph', id)}
                         onOpenConflict={(b) => setActiveConflictBlock(b)}
                         onOpenAstInspector={(b) => setInspectedAstBlock(b)}
+                        presencePeers={presenceUsers}
                       />
                     ))}
                   </div>
