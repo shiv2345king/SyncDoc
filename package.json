@@ -1,7 +1,5 @@
 {
   "dependencies": {
-    "express": "^5.2.1",
-    "mongodb": "^7.5.0",
-    "mongoose": "^9.9.3"
+    "dotenv": "^17.4.2"
   }
 }
