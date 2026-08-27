@@ -22,8 +22,6 @@ const documentSchema = new Schema<IDocument>({
   rootNodeId: { type: Schema.Types.ObjectId, ref: "BlockNode", default: null },
 }, { timestamps: true });
 
-// Example pre-save hook, in case you add validation here later —
-// same async/await style, no `next` parameter:
 documentSchema.pre("save", async function () {
   if (!this.title || this.title.trim().length === 0) {
     throw new Error("Document title cannot be empty");
