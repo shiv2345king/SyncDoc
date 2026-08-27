@@ -5,9 +5,15 @@ import { BlockNode } from "../models/BlockNodeModel";
 export const persistYjsToMongo = async (documentId: string, ydoc: Y.Doc): Promise<void> => {
   const yBlocks = ydoc.getMap("blocks"); // structure depends on how you map AST -> Yjs types
 
-  yBlocks.forEach(async (yBlock: any, blockId: string) => {
-    await BlockNode.findByIdAndUpdate(blockId, {
-      content: yBlock.get("content"),
-    });
+  const updates = Array.from(yBlocks.entries()).map(async ([blockId, yBlock]: [string, any]) => {
+    try {
+      await BlockNode.findByIdAndUpdate(blockId, {
+        content: yBlock.get("content"),
+      });
+    } catch (err) {
+      console.error(`Failed to persist block ${blockId}:`, (err as Error).message);
+    }
   });
+
+  await Promise.all(updates);
 };
