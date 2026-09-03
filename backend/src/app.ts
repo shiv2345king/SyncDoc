@@ -10,6 +10,8 @@ app.use(express.json());
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok" });
 });
+import authRoutes from "./routes/authRoutes";
 
+app.use("/api/auth", authRoutes);
 
 export default app;
