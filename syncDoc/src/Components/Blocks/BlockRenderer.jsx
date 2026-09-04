@@ -11,6 +11,7 @@ import { DividerBlock } from './DividerBlock';
 export function BlockRenderer({
   block,
   selectedBlockId,
+  selectionBlockIds = null,
   onSelectBlock,
   onUpdateBlock,
   onDeleteBlock,
@@ -62,6 +63,7 @@ export function BlockRenderer({
     <BlockWrapper
       block={block}
       isSelected={isSelected}
+      isInSelection={Boolean(selectionBlockIds?.includes(block.id))}
       onSelect={onSelectBlock}
       onDelete={onDeleteBlock}
       onMoveUp={onMoveUp}
