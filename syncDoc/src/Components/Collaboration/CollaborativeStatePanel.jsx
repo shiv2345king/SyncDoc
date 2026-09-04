@@ -8,7 +8,8 @@ import {
   ChevronDown,
   Check,
   Zap,
-  Globe
+  Globe,
+  MousePointer2
 } from 'lucide-react';
 
 export function CollaborativeStatePanel({
@@ -17,12 +18,19 @@ export function CollaborativeStatePanel({
   clientId,
   presenceUsers,
   activeDoc,
+  cursorState = { blockId: null, offset: 0 },
+  selectionState = null,
   onSimulatePeer,
   onReconnect
 }) {
   const [isExpanded, setIsExpanded] = useState(true);
 
   const blockCount = activeDoc?.ast?.children?.length || 0;
+
+  // Selection bounds summary (atomic block state)
+  const selectionSummary = selectionState
+    ? `${selectionState.blockIds?.length || 0} block(s): ${selectionState.startBlockId || '?'} → ${selectionState.endBlockId || '?'}`
+    : 'No active selection';
 
   return (
     <div className="collaborative-state-panel">
@@ -74,6 +82,48 @@ export function CollaborativeStatePanel({
               <div className="metric-box">
                 <span className="metric-label">AST Shared Blocks</span>
                 <span className="metric-value highlight">{blockCount} Nodes</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Section: Local Cursor & Selection Bounds */}
+          <div className="state-section">
+            <div className="section-title">
+              <MousePointer2 size={13} />
+              <span>Active Cursor &amp; Selection Bounds</span>
+            </div>
+            <div className="presence-roster">
+              <div className="roster-item">
+                <div className="roster-info">
+                  <div className="roster-name">Cursor Position</div>
+                  <div className="roster-activity">
+                    {cursorState.blockId ? (
+                      <span className="editing-tag">
+                        <Zap size={10} /> Block #{cursorState.blockId} · offset {cursorState.offset ?? 0}
+                      </span>
+                    ) : (
+                      <span className="idle-tag">
+                        <Check size={10} /> No block focused
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="roster-item">
+                <div className="roster-info">
+                  <div className="roster-name">Selection Bounds</div>
+                  <div className="roster-activity">
+                    {selectionState ? (
+                      <span className="editing-tag">
+                        <Zap size={10} /> {selectionSummary}
+                      </span>
+                    ) : (
+                      <span className="idle-tag">
+                        <Check size={10} /> {selectionSummary}
+                      </span>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
