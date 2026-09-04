@@ -1,17 +1,17 @@
-import { 
-  Wifi, 
-  WifiOff, 
-  RefreshCw, 
-  Radio, 
+import {
+  Wifi,
+  WifiOff,
+  RefreshCw,
+  Radio,
   Cpu
 } from 'lucide-react';
 
-export function YjsConnectionStatus({ 
-  status, 
-  roomName, 
-  clientId, 
-  onReconnect, 
-  onDisconnect 
+export function YjsConnectionStatus({
+  status,
+  roomName,
+  clientId,
+  onReconnect,
+  onDisconnect
 }) {
   const getStatusBadge = () => {
     switch (status) {
@@ -54,18 +54,18 @@ export function YjsConnectionStatus({
       </div>
 
       {status === 'disconnected' ? (
-        <button 
-          type="button" 
-          onClick={onReconnect} 
+        <button
+          type="button"
+          onClick={onReconnect}
           className="ws-action-btn connect"
         >
           <Wifi size={12} />
           <span>Connect WS</span>
         </button>
       ) : (
-        <button 
-          type="button" 
-          onClick={onDisconnect} 
+        <button
+          type="button"
+          onClick={onDisconnect}
           className="ws-action-btn disconnect"
         >
           <WifiOff size={12} />
