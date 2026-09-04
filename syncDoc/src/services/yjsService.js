@@ -16,6 +16,8 @@ class YjsCollaborationManager {
       avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
       color: '#6366f1',
       cursorBlockId: null,
+      cursorOffset: 0,
+      selection: null,
       lastActive: new Date().toISOString()
     };
   }
@@ -51,11 +53,7 @@ class YjsCollaborationManager {
 
       // Listen for remote presence updates
       awareness.on('change', () => {
-        const states = Array.from(awareness.getStates().values())
-          .filter(state => state.user)
-          .map(state => state.user);
-        
-        this.notifyPresence(states);
+        this.notifyPresence(this.collectPeerStates(awareness));
       });
 
       // Observe Yjs Shared AST Array
@@ -71,6 +69,31 @@ class YjsCollaborationManager {
     }
   }
 
+  /**
+   * Normalize every awareness user state into a guaranteed cursor/selection
+   * shape so all sessions render remote cursors identically.
+   * Cursors older than STALE_CURSOR_MS are reported as idle.
+   */
+  collectPeerStates(awareness) {
+    const STALE_CURSOR_MS = 60_000;
+    const now = Date.now();
+
+    return Array.from(awareness.getStates().values())
+      .filter(state => state.user)
+      .map(state => {
+        const user = state.user;
+        const lastActiveMs = user.lastActive ? Date.parse(user.lastActive) : 0;
+        const isStale = now - lastActiveMs > STALE_CURSOR_MS;
+
+        return {
+          ...user,
+          cursorBlockId: isStale ? null : (user.cursorBlockId ?? null),
+          cursorOffset: isStale ? 0 : (user.cursorOffset ?? 0),
+          selection: isStale ? null : (user.selection ?? null)
+        };
+      });
+  }
+
   disconnect() {
     if (this.provider) {
       this.provider.disconnect();
@@ -78,6 +101,18 @@ class YjsCollaborationManager {
       this.provider = null;
     }
     this.notifyStatus('disconnected');
+  }
+
+  /**
+   * Broadcast the local cursor position and selection bounds via awareness.
+   * cursor: { blockId, offset }  selection: { startBlockId, endBlockId, blockIds } | null
+   */
+  broadcastCursorState({ cursorBlockId, cursorOffset = 0, selection = null }) {
+    return this.updateLocalPresence({
+      cursorBlockId,
+      cursorOffset,
+      selection
+    });
   }
 
   updateLocalPresence(updates) {

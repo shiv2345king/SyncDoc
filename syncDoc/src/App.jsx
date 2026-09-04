@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { LogOut } from 'lucide-react';
 import { INITIAL_DOCUMENTS } from './models/sampleData';
 import { yjsService } from './services/yjsService';
 import { DocumentSidebar } from './Components/Sidebar/DocumentSidebar';
@@ -10,12 +11,62 @@ import { ASTInspectorModal } from './Components/ASTViewer/ASTInspectorModal';
 import { NewBlockModal } from './Components/NewBlockModal';
 import { DocumentGridView } from './Components/DocumentBrowser/DocumentGridView';
 import { CollaborativeStatePanel } from './Components/Collaboration/CollaborativeStatePanel';
+import { BlockStateProvider, useBlockState } from './context/BlockStateContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { LandingPage } from './Components/Auth/LandingPage';
 import './App.css';
 
 function App() {
+  return (
+    <AuthProvider>
+      <AppGate />
+    </AuthProvider>
+  );
+}
+
+/** Shows the landing/auth page until the user signs in, then the workspace. */
+function AppGate() {
+  const { isAuthenticated, user, logout } = useAuth();
+
+  return isAuthenticated ? (
+    <BlockStateProvider>
+      <AppWorkspace user={user} onLogout={logout} />
+    </BlockStateProvider>
+  ) : (
+    <LandingPage onLogin={useAuth()} />
+  );
+}
+
+function AppWorkspace({ user, onLogout }) {
   const [documents, setDocuments] = useState(INITIAL_DOCUMENTS);
   const [activeDocId, setActiveDocId] = useState('doc-1');
-  const [selectedBlockId, setSelectedBlockId] = useState(null);
+
+  // Claim the authenticated identity for collaborative presence.
+  useEffect(() => {
+    if (user) {
+      yjsService.updateLocalPresence({
+        id: user.id,
+        name: `${user.name} (You)`,
+        avatar: user.avatar,
+        color: user.color,
+        cursorBlockId: null,
+        cursorOffset: 0,
+        selection: null
+      });
+    }
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Atomic block-management state: active cursor + selection bounds
+  const {
+    cursor,
+    selection,
+    setActiveCursor,
+    startSelection,
+    extendSelection,
+    clearSelection,
+    getSelectionBounds
+  } = useBlockState();
+  const selectedBlockId = cursor.blockId;
   const [activeFilter, setActiveFilter] = useState('all');
   const [viewMode, setViewMode] = useState('split'); // 'editor' | 'split' | 'ast-tree' | 'grid'
   const [isDarkMode, setIsDarkMode] = useState(false);
@@ -23,29 +74,13 @@ function App() {
   // Yjs Collaboration & Presence State
   const [yjsStatus, setYjsStatus] = useState('disconnected');
   const [yjsClientId, setYjsClientId] = useState(0);
-  const [presenceUsers, setPresenceUsers] = useState([
-    {
-      id: 'local-1',
-      name: 'Alex Rivers (You)',
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
-      color: '#6366f1',
-      cursorBlockId: null
-    },
-    {
-      id: 'peer-2',
-      name: 'Elena Rostova',
-      avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&auto=format&fit=crop&q=80',
-      color: '#ec4899',
-      cursorBlockId: 'blk-105'
-    },
-    {
-      id: 'peer-3',
-      name: 'Marcus Chen',
-      avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&auto=format&fit=crop&q=80',
-      color: '#10b981',
-      cursorBlockId: 'blk-108'
-    }
-  ]);
+  const [presenceUsers, setPresenceUsers] = useState(user ? [{
+    id: user.id,
+    name: `${user.name} (You)`,
+    avatar: user.avatar,
+    color: user.color,
+    cursorBlockId: null
+  }] : []);
   const [showCollabState, setShowCollabState] = useState(false);
 
   // Modals
@@ -85,6 +120,23 @@ function App() {
     };
   }, [activeDocId]);
 
+  // Real-time cursor sync across sessions: whenever the socket reconnects,
+  // immediately re-advertise the current cursor + selection bounds so peers
+  // render our cursor without waiting for the next click.
+  useEffect(() => {
+    if (yjsStatus === 'connected') {
+      const orderedIds = (activeDoc?.ast?.children || []).map(b => b.id);
+      const bounds = selection ? getSelectionBounds(orderedIds) : null;
+      yjsService.broadcastCursorState({
+        cursorBlockId: cursor.blockId,
+        cursorOffset: cursor.offset,
+        selection: bounds
+          ? { startBlockId: bounds.startBlockId, endBlockId: bounds.endBlockId, blockIds: bounds.blockIds }
+          : null
+      });
+    }
+  }, [yjsStatus, cursor.blockId, cursor.offset]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Sync active document AST blocks to Yjs
   useEffect(() => {
     if (activeDoc?.ast?.children) {
@@ -118,7 +170,8 @@ function App() {
   };
   const handleSelectDoc = (id) => {
     setActiveDocId(id);
-    setSelectedBlockId(null);
+    setActiveCursor(null, 0);
+    clearSelection();
   };
 
   const handleCreateDoc = () => {
@@ -310,7 +363,8 @@ function App() {
       };
     }));
 
-    setSelectedBlockId(newBlock.id);
+    setActiveCursor(newBlock.id, 0);
+    clearSelection();
   };
 
   // Conflict Resolution
@@ -346,6 +400,42 @@ function App() {
     setActiveConflictBlock(null);
   };
 
+  /**
+   * Block selection / cursor handling with atomic state updates.
+   * Plain click  → move active cursor to the block (offset 0)
+   * Shift+click  → extend the selection bounds from the anchor to this block
+   * Either way the cursor + selection are broadcast through Yjs awareness.
+   */
+  const handleBlockSelect = (blockId, opts = {}) => {
+    const { shiftKey = false, offset = 0 } = opts;
+
+    if (shiftKey) {
+      if (!selection) {
+        // No anchor yet — start a new selection at this block
+        startSelection(blockId, offset);
+      } else {
+        extendSelection(blockId, offset);
+      }
+    } else {
+      clearSelection();
+      setActiveCursor(blockId, offset);
+    }
+
+    // Reflect the atomic state in collaborative presence
+    const orderedIds = (activeDoc?.ast?.children || []).map(b => b.id);
+    const bounds = shiftKey
+      ? getSelectionBounds(orderedIds)
+      : null;
+
+    yjsService.broadcastCursorState({
+      cursorBlockId: blockId,
+      cursorOffset: offset,
+      selection: bounds
+        ? { startBlockId: bounds.startBlockId, endBlockId: bounds.endBlockId, blockIds: bounds.blockIds }
+        : null
+    });
+  };
+
   const handleExportAstJson = () => {
     if (!activeDoc) return;
     const jsonStr = JSON.stringify(activeDoc.ast, null, 2);
@@ -374,6 +464,20 @@ function App() {
 
       {/* Main Workspace */}
       <main className="sync-workspace">
+        {/* Authenticated user chip + logout */}
+        <div className="session-user-chip" title={user?.email}>
+          <img src={user?.avatar} alt={user?.name} className="session-avatar" />
+          <span className="session-name">{user?.name}</span>
+          <button
+            type="button"
+            className="session-logout-btn"
+            onClick={onLogout}
+            title="Sign out"
+          >
+            <LogOut size={14} />
+          </button>
+        </div>
+
         {viewMode === 'grid' ? (
           <DocumentGridView
             documents={documents}
@@ -417,6 +521,8 @@ function App() {
                 clientId={yjsClientId}
                 presenceUsers={presenceUsers}
                 activeDoc={activeDoc}
+                cursorState={cursor}
+                selectionState={selection ? getSelectionBounds((activeDoc?.ast?.children || []).map(b => b.id)) : null}
                 onSimulatePeer={handleSimulatePeer}
                 onReconnect={() => yjsService.connect(activeDocId)}
               />
@@ -427,15 +533,16 @@ function App() {
               {(viewMode === 'editor' || viewMode === 'split') && (
                 <div className="document-scroll-canvas">
                   <div className="document-paper-sheet">
-                    {activeDoc?.ast?.children?.map(block => (
+                    {(() => {
+                      const orderedIds = (activeDoc?.ast?.children || []).map(b => b.id);
+                      const selBounds = getSelectionBounds(orderedIds);
+                      return activeDoc?.ast?.children?.map(block => (
                       <BlockRenderer
                         key={block.id}
                         block={block}
                         selectedBlockId={selectedBlockId}
-                        onSelectBlock={(id) => {
-                          setSelectedBlockId(id);
-                          yjsService.updateLocalPresence({ cursorBlockId: id });
-                        }}
+                        selectionBlockIds={selBounds?.blockIds || null}
+                        onSelectBlock={handleBlockSelect}
                         onUpdateBlock={handleUpdateBlock}
                         onDeleteBlock={handleDeleteBlock}
                         onMoveUp={(id) => handleMoveBlock(id, 'up')}
@@ -443,19 +550,21 @@ function App() {
                         onInsertAfter={(id) => handleAddBlock('paragraph', id)}
                         onOpenConflict={(b) => setActiveConflictBlock(b)}
                         onOpenAstInspector={(b) => setInspectedAstBlock(b)}
-                        presencePeers={presenceUsers}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
+                                  presencePeers={presenceUsers}
+                                />
+                                ));
+                              })()}
+                            </div>
+                          </div>
+                        )}
 
               {/* AST Tree Visualizer Side Panel or Full Panel */}
               {(viewMode === 'split' || viewMode === 'ast-tree') && (
                 <ASTTreeVisualizer
                   document={activeDoc}
                   selectedBlockId={selectedBlockId}
-                  onSelectBlock={setSelectedBlockId}
+                  selectionBlockIds={getSelectionBounds((activeDoc?.ast?.children || []).map(b => b.id))?.blockIds || null}
+                  onSelectBlock={handleBlockSelect}
                   onOpenConflictModal={(b) => setActiveConflictBlock(b)}
                   onOpenAstInspector={(b) => setInspectedAstBlock(b)}
                 />

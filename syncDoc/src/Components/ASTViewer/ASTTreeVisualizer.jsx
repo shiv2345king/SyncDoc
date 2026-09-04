@@ -13,6 +13,7 @@ import {
 export function ASTTreeVisualizer({
   document,
   selectedBlockId,
+  selectionBlockIds = null,
   onSelectBlock,
   onOpenConflictModal,
   onOpenAstInspector
@@ -87,6 +88,7 @@ export function ASTTreeVisualizer({
             <div className="ast-node-children">
               {blocks.map((block, idx) => {
                 const isSelected = block.id === selectedBlockId;
+                const isInSelection = Boolean(selectionBlockIds?.includes(block.id));
                 const hasConflict = Boolean(block.conflict);
                 const isExpanded = expandedNodes[block.id];
                 const previewText = getNodePreviewText(block);
@@ -94,13 +96,13 @@ export function ASTTreeVisualizer({
                 return (
                   <div
                     key={block.id || idx}
-                    className={`ast-node-item child-block ${isSelected ? 'is-selected' : ''} ${hasConflict ? 'has-conflict' : ''}`}
+                    className={`ast-node-item child-block ${isSelected ? 'is-selected' : ''} ${isInSelection ? 'is-in-selection' : ''} ${hasConflict ? 'has-conflict' : ''}`}
                   >
                     <div
                       className="ast-node-row"
                       onClick={(e) => {
                         e.stopPropagation();
-                        onSelectBlock(block.id);
+                        onSelectBlock(block.id, { shiftKey: e.shiftKey });
                         toggleExpand(block.id);
                       }}
                     >
