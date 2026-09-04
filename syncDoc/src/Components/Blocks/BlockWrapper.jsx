@@ -1,4 +1,5 @@
 import { useState, cloneElement } from 'react';
+import { useBlockState } from '../../context/BlockStateContext';
 import {
   GripVertical,
   ChevronUp,
@@ -15,6 +16,7 @@ import {
 export function BlockWrapper({
   block,
   isSelected,
+  isInSelection = false,
   onSelect,
   onDelete,
   onMoveUp,
@@ -28,8 +30,16 @@ export function BlockWrapper({
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [showTypeMenu, setShowTypeMenu] = useState(false);
+  const { cursor } = useBlockState();
+  const isCursorActive = cursor.blockId === block.id;
 
-  const activePeer = presencePeers.find(p => p.cursorBlockId === block.id);
+  // All peers whose cursor or selection range covers this block
+  const activePeers = presencePeers.filter(p => p.cursorBlockId === block.id);
+  const selectionPeers = presencePeers.filter(
+    p => Array.isArray(p.selection?.blockIds) && p.selection.blockIds.includes(block.id)
+  );
+  const peerColorList = [...new Set([...activePeers, ...selectionPeers].map(p => p.color || '#6366f1'))];
+
   const isConflict = Boolean(block.conflict);
 
   const blockTypeLabels = {
@@ -61,10 +71,14 @@ export function BlockWrapper({
 
   return (
     <div
-      className={`ast-block-wrapper ${isSelected ? 'is-selected' : ''} ${isConflict ? 'has-conflict' : ''}`}
+      className={`ast-block-wrapper ${isSelected ? 'is-selected' : ''} ${isInSelection ? 'is-in-selection' : ''} ${isCursorActive ? 'has-active-cursor' : ''} ${peerColorList.length > 0 ? 'has-peer-cursor' : ''} ${isConflict ? 'has-conflict' : ''}`}
+      style={peerColorList.length > 0 ? { '--peer-cursor-colors': peerColorList.join(',') } : undefined}
       onClick={(e) => {
         e.stopPropagation();
-        onSelect(block.id);
+        onSelect(block.id, {
+          shiftKey: e.shiftKey,
+          offset: cursor.blockId === block.id ? cursor.offset : 0
+        });
       }}
     >
       {/* Left Handle & Hover Controls */}
@@ -103,11 +117,39 @@ export function BlockWrapper({
 
       {/* Main Block Content Area */}
       <div className="block-main-content">
-        {/* Active Peer Presence Cursor Indicator */}
-        {activePeer && (
-          <div className="peer-cursor-badge" style={{ backgroundColor: activePeer.color || '#6366f1' }}>
+        {/* Remote Peer Presence Cursor Indicators (one badge per peer) */}
+        {activePeers.map(peer => (
+          <div
+            key={peer.id}
+            className="peer-cursor-badge"
+            style={{ backgroundColor: peer.color || '#6366f1' }}
+          >
             <span className="cursor-dot" />
-            <span>{activePeer.name} is editing...</span>
+            <span>
+              {peer.name} · offset {peer.cursorOffset ?? 0}
+            </span>
+          </div>
+        ))}
+
+        {/* Peers selecting within this block (no direct cursor) */}
+        {selectionPeers
+          .filter(p => !activePeers.includes(p))
+          .map(peer => (
+            <div
+              key={peer.id}
+              className="peer-selection-badge"
+              style={{ '--peer-color': peer.color || '#6366f1' }}
+            >
+              <span className="cursor-dot" style={{ backgroundColor: peer.color || '#6366f1' }} />
+              <span>{peer.name} selected {peer.selection.blockIds.length} block(s)</span>
+            </div>
+          ))}
+
+        {/* Local Active Cursor Indicator (atomic cursor state) */}
+        {isCursorActive && (
+          <div className="local-cursor-badge">
+            <span className="cursor-dot local" />
+            <span>Active cursor · offset {cursor.offset}</span>
           </div>
         )}
 
