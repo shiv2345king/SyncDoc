@@ -1,14 +1,14 @@
-import { 
-  Users, 
-  UserPlus, 
+import {
+  Users,
+  UserPlus,
   Sparkles,
   MousePointer2
 } from 'lucide-react';
 
-export function UserPresenceBar({ 
-  presenceUsers, 
+export function UserPresenceBar({
+  presenceUsers,
   onSimulatePeer,
-  activeDocBlocks 
+  activeDocBlocks
 }) {
   return (
     <div className="user-presence-bar">
@@ -19,15 +19,15 @@ export function UserPresenceBar({
 
       <div className="presence-avatars-list">
         {presenceUsers.map((user, idx) => (
-          <div 
-            key={user.id || idx} 
+          <div
+            key={user.id || idx}
             className="presence-avatar-item"
             style={{ '--peer-color': user.color || '#6366f1' }}
           >
             <div className="avatar-wrapper">
-              <img 
-                src={user.avatar} 
-                alt={user.name} 
+              <img
+                src={user.avatar}
+                alt={user.name}
                 className="peer-avatar"
               />
               <span className="online-dot-pulse" style={{ backgroundColor: user.color }} />
