@@ -5,6 +5,7 @@ import authRoutes from "./routes/authRoutes";
 import documentRoutes from "./routes/documentRoutes";
 import blockRoutes from "./routes/blockRoutes";
 import oauthRoutes from "./routes/oauthRoutes";
+import { appendFile } from "fs/promises";
 
 const app: Application = express();
 
