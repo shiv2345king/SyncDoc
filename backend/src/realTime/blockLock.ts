@@ -19,8 +19,8 @@ export const acquireBlockLock = async (
 };
 
 export const releaseBlockLock = async (blockId: string, userId: string): Promise<void> => {
-  const currentHolder = await redis.get(`lock:block:${blockId}`);
-  if (currentHolder === userId) {
+  const CurrentHolder = await redis.get(`lock:block:${blockId}`);
+  if (CurrentHolder === userId) {
     await redis.del(`lock:block:${blockId}`);
   }
 };
