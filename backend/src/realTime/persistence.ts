@@ -5,7 +5,7 @@ import { BlockNode } from "../models/BlockNodeModel";
 export const persistYjsToMongo = async (documentId: string, ydoc: Y.Doc): Promise<void> => {
   const yBlocks = ydoc.getMap("blocks"); // structure depends on how you map AST -> Yjs types
 
-  const updates = Array.from(yBlocks.entries()).map(async ([blockId, yBlock]: [string, any]) => {
+  const Updates = Array.from(yBlocks.entries()).map(async ([blockId, yBlock]: [string, any]) => {
     try {
       await BlockNode.findByIdAndUpdate(blockId, {
         content: yBlock.get("content"),
@@ -15,5 +15,5 @@ export const persistYjsToMongo = async (documentId: string, ydoc: Y.Doc): Promis
     }
   });
 
-  await Promise.all(updates);
+  await Promise.all(Updates);
 };
