@@ -11,11 +11,11 @@ export const initSocketLocking = (io: SocketIOServer): void => {
     console.log(`Socket connected: ${socket.id}`);
 
     socket.on("block:lock:request", async ({ blockId, userId }: LockRequestPayload) => {
-      const acquired = await acquireBlockLock(blockId, userId);
+      const Acquired = await acquireBlockLock(blockId, userId);
 
-      socket.emit("block:lock:result", { blockId, acquired });
+      socket.emit("block:lock:result", { blockId, acquired: Acquired });
 
-      if (acquired) {
+      if (Acquired) {
         socket.broadcast.emit("block:locked", { blockId, userId });
       }
     });
