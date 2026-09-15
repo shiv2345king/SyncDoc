@@ -22,7 +22,7 @@ class YjsCollaborationManager {
     };
   }
 
-  connect(roomName, serverUrl = 'wss://demos.yjs.dev') {
+  connect(roomName, serverUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:5000/yjs') {
     if (this.provider) {
       this.disconnect();
     }

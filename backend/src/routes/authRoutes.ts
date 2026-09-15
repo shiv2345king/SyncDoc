@@ -1,8 +1,8 @@
-
 import { Router, Request, Response } from "express";
 import { UserModel } from "../models/userModel";
 import { hashPassword, comparePassword } from "../utils/passwordUtils";
 import { generateToken } from "../utils/jwtUtils";
+import { protect, AuthenticatedRequest } from "../middleware/authMiddleware";
 
 const router = Router();
 
@@ -75,6 +75,28 @@ router.post("/login", async (req: Request, res: Response) => {
   } catch (err) {
     console.error("Login error:", err);
     res.status(500).json({ message: "Something went wrong during login" });
+  }
+});
+
+router.get("/me", protect, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const user = await UserModel.findById(req.userId);
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.json({
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        avatarUrl: user.avatarUrl,
+      },
+    });
+  } catch (err) {
+    console.error("Fetch profile error:", err);
+    res.status(500).json({ message: "Something went wrong" });
   }
 });
 

@@ -1,7 +1,9 @@
-import { useState, useEffect } from 'react';
-import { LogOut } from 'lucide-react';
-import { INITIAL_DOCUMENTS } from './models/sampleData';
+import { useState, useEffect, useCallback } from 'react';
+import { LogOut, Loader2 } from 'lucide-react';
 import { yjsService } from './services/yjsService';
+import { documentService, normalizeDocument } from './services/documentService';
+import { blockService } from './services/blockService';
+import { toFrontendBlock } from './models/blockTransform';
 import { DocumentSidebar } from './Components/Sidebar/DocumentSidebar';
 import { DocumentHeader } from './Components/Header/DocumentHeader';
 import { BlockRenderer } from './Components/Blocks/BlockRenderer';
@@ -24,22 +26,35 @@ function App() {
   );
 }
 
-/** Shows the landing/auth page until the user signs in, then the workspace. */
+/** Shows a boot screen while an OAuth redirect is verified, then the landing/auth page, then the workspace. */
 function AppGate() {
-  const { isAuthenticated, user, logout } = useAuth();
+  const auth = useAuth();
+  const { isAuthenticated, user, logout, checkingOAuth } = auth;
+
+  if (checkingOAuth) {
+    return (
+      <div className="oauth-loading">
+        <Loader2 size={22} className="spin" />
+        <span>Signing you in…</span>
+      </div>
+    );
+  }
 
   return isAuthenticated ? (
     <BlockStateProvider>
       <AppWorkspace user={user} onLogout={logout} />
     </BlockStateProvider>
   ) : (
-    <LandingPage onLogin={useAuth()} />
+    <LandingPage onLogin={auth} />
   );
 }
 
 function AppWorkspace({ user, onLogout }) {
-  const [documents, setDocuments] = useState(INITIAL_DOCUMENTS);
-  const [activeDocId, setActiveDocId] = useState('doc-1');
+  const [documents, setDocuments] = useState([]);
+  const [activeDocId, setActiveDocId] = useState(null);
+  const [docsLoading, setDocsLoading] = useState(true);
+  const [docDetailLoading, setDocDetailLoading] = useState(false);
+  const [loadError, setLoadError] = useState(null);
 
   // Claim the authenticated identity for collaborative presence.
   useEffect(() => {
@@ -88,7 +103,61 @@ function AppWorkspace({ user, onLogout }) {
   const [inspectedAstBlock, setInspectedAstBlock] = useState(null);
   const [showNewBlockModal, setShowNewBlockModal] = useState(false);
 
-  const activeDoc = documents.find(d => d.id === activeDocId) || documents[0];
+  const activeDoc = documents.find(d => d.id === activeDocId) || null;
+
+  // Load the signed-in user's documents from the backend once on mount.
+  useEffect(() => {
+    let cancelled = false;
+    setDocsLoading(true);
+    setLoadError(null);
+
+    documentService
+      .list(user?.name)
+      .then((docs) => {
+        if (cancelled) return;
+        setDocuments(docs);
+        if (docs.length > 0) setActiveDocId(docs[0].id);
+      })
+      .catch((err) => {
+        if (!cancelled) setLoadError(err.message || 'Failed to load documents');
+      })
+      .finally(() => {
+        if (!cancelled) setDocsLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Whenever the active document changes, fetch its blocks and merge them in
+  // (the list endpoint intentionally doesn't return blocks, to keep it light).
+  useEffect(() => {
+    if (!activeDocId) return;
+    const alreadyLoaded = documents.find(d => d.id === activeDocId)?.ast?.children?.length > 0;
+    if (alreadyLoaded) return;
+
+    let cancelled = false;
+    setDocDetailLoading(true);
+
+    documentService
+      .getWithBlocks(activeDocId)
+      .then(({ blocks }) => {
+        if (cancelled) return;
+        const frontendBlocks = blocks
+          .map(toFrontendBlock)
+          .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+
+        setDocuments((prev) => prev.map((d) =>
+          d.id === activeDocId
+            ? { ...d, ast: { ...d.ast, children: frontendBlocks } }
+            : d
+        ));
+      })
+      .catch((err) => setLoadError(err.message || 'Failed to load document'))
+      .finally(() => { if (!cancelled) setDocDetailLoading(false); });
+
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeDocId]);
 
   useEffect(() => {
     if (isDarkMode) {
@@ -100,6 +169,7 @@ function AppWorkspace({ user, onLogout }) {
 
   // Connect client to Yjs WebSocket on active doc change
   useEffect(() => {
+    if (!activeDocId) return;
     yjsService.connect(activeDocId);
 
     const unsubStatus = yjsService.onStatusChange(status => {
@@ -144,7 +214,8 @@ function AppWorkspace({ user, onLogout }) {
     }
   }, [activeDocId, activeDoc?.ast?.children]);
 
-  // Peer Presence Simulation
+  // Peer Presence Simulation — a manual demo trigger (button in the header),
+  // not persisted anywhere; useful for demoing presence UI without a second browser.
   const handleSimulatePeer = (blocks) => {
     const peerNames = ['Sarah Jenkins', 'David Kim', 'Amara Okafor', 'Liam Vance'];
     const peerAvatars = [
@@ -168,92 +239,74 @@ function AppWorkspace({ user, onLogout }) {
 
     setPresenceUsers(prev => [...prev.filter(p => p.id !== simulatedPeer.id), simulatedPeer]);
   };
+
   const handleSelectDoc = (id) => {
     setActiveDocId(id);
     setActiveCursor(null, 0);
     clearSelection();
   };
 
-  const handleCreateDoc = () => {
-    const newDocId = `doc-${Date.now()}`;
-    const newDoc = {
-      id: newDocId,
-      title: "Untitled Collaborative Document",
-      category: "General",
-      author: "Local User",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      status: "draft",
-      tags: ["Draft", "AST"],
-      collaborators: [
-        { id: "u1", name: "Local User", avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80", color: "#6366f1" }
-      ],
-      ast: {
-        type: "doc",
-        version: 1,
-        children: [
-          {
-            id: `blk-${Date.now()}-1`,
-            type: "heading",
-            level: 1,
-            content: [{ text: "Untitled Document Title", format: { bold: true } }],
-            version: 1,
-            metadata: { createdBy: "Local User" }
-          },
-          {
-            id: `blk-${Date.now()}-2`,
-            type: "paragraph",
-            content: [{ text: "Start editing text blocks using the block-level rendering engine..." }],
-            version: 1,
-            metadata: { createdBy: "Local User" }
-          }
-        ]
-      }
-    };
+  const handleCreateDoc = async () => {
+    try {
+      const newDoc = await documentService.create('Untitled Collaborative Document', user?.name);
 
-    setDocuments([newDoc, ...documents]);
-    setActiveDocId(newDocId);
-    if (viewMode === 'grid') setViewMode('split');
+      // Seed it with a starter heading + paragraph, same as before — just
+      // persisted for real this time.
+      const headingBlock = await blockService.create(
+        { type: 'heading', level: 1, content: [{ text: 'Untitled Document Title', format: { bold: true } }], version: 1, metadata: { createdBy: user?.name } },
+        newDoc.id,
+        0
+      );
+      const paragraphBlock = await blockService.create(
+        { type: 'paragraph', content: [{ text: 'Start editing text blocks using the block-level rendering engine...' }], version: 1, metadata: { createdBy: user?.name } },
+        newDoc.id,
+        1
+      );
+
+      const hydratedDoc = { ...newDoc, ast: { ...newDoc.ast, children: [headingBlock, paragraphBlock] } };
+
+      setDocuments(prev => [hydratedDoc, ...prev]);
+      setActiveDocId(newDoc.id);
+      if (viewMode === 'grid') setViewMode('split');
+    } catch (err) {
+      setLoadError(err.message || 'Failed to create document');
+    }
   };
 
+  // NOTE: the backend doesn't expose DELETE /api/documents/:id or
+  // PATCH /api/documents/:id yet — these two stay local-only until that
+  // route exists, so a page refresh will bring a deleted/renamed doc back.
   const handleDeleteDoc = (docId) => {
     const remaining = documents.filter(d => d.id !== docId);
     setDocuments(remaining);
-    if (activeDocId === docId && remaining.length > 0) {
-      setActiveDocId(remaining[0].id);
+    if (activeDocId === docId) {
+      setActiveDocId(remaining.length > 0 ? remaining[0].id : null);
     }
   };
 
   const handleUpdateDocTitle = (newTitle) => {
     setDocuments(documents.map(d => {
       if (d.id !== activeDocId) return d;
-      return {
-        ...d,
-        title: newTitle,
-        updatedAt: new Date().toISOString()
-      };
+      return { ...d, title: newTitle, updatedAt: new Date().toISOString() };
     }));
   };
 
-  // Block Level Handlers
-  const handleUpdateBlock = (updatedBlock) => {
-    setDocuments(documents.map(doc => {
+  // Block Level Handlers — optimistic local update, backed by a real PATCH.
+  const handleUpdateBlock = useCallback((updatedBlock) => {
+    setDocuments(prevDocs => prevDocs.map(doc => {
       if (doc.id !== activeDocId) return doc;
-      const newChildren = doc.ast.children.map(blk => {
-        if (blk.id !== updatedBlock.id) return blk;
-        return updatedBlock;
-      });
+      const newChildren = doc.ast.children.map(blk => (blk.id === updatedBlock.id ? updatedBlock : blk));
       return {
         ...doc,
         updatedAt: new Date().toISOString(),
-        ast: {
-          ...doc.ast,
-          version: (doc.ast.version || 1) + 1,
-          children: newChildren
-        }
+        ast: { ...doc.ast, version: (doc.ast.version || 1) + 1, children: newChildren }
       };
     }));
-  };
+
+    blockService.update(updatedBlock).catch((err) => {
+      console.error('Failed to save block:', err.message);
+    });
+  }, [activeDocId]);
 
   const handleDeleteBlock = (blockId) => {
     setDocuments(documents.map(doc => {
@@ -262,15 +315,17 @@ function AppWorkspace({ user, onLogout }) {
       return {
         ...doc,
         updatedAt: new Date().toISOString(),
-        ast: {
-          ...doc.ast,
-          version: (doc.ast.version || 1) + 1,
-          children: newChildren
-        }
+        ast: { ...doc.ast, version: (doc.ast.version || 1) + 1, children: newChildren }
       };
     }));
+
+    blockService.remove(blockId).catch((err) => {
+      console.error('Failed to delete block:', err.message);
+    });
   };
 
+  // NOTE: reordering is local-only for now — the backend has no batch
+  // reorder endpoint, so a refresh will restore the last persisted order.
   const handleMoveBlock = (blockId, direction) => {
     if (!activeDoc) return;
     const blocks = [...activeDoc.ast.children];
@@ -286,116 +341,108 @@ function AppWorkspace({ user, onLogout }) {
 
     setDocuments(documents.map(doc => {
       if (doc.id !== activeDocId) return doc;
-      return {
-        ...doc,
-        ast: { ...doc.ast, children: blocks }
-      };
+      return { ...doc, ast: { ...doc.ast, children: blocks } };
     }));
   };
 
-  const handleAddBlock = (blockType, insertAfterId = null) => {
+  const handleAddBlock = async (blockType, insertAfterId = null) => {
     if (!activeDoc) return;
 
-    let newBlock = {
-      id: `blk-${Date.now()}`,
-      type: blockType,
-      version: 1,
-      metadata: { createdBy: "Local User" }
-    };
+    let draft = { type: blockType, version: 1, metadata: { createdBy: user?.name } };
 
     switch (blockType) {
       case 'heading':
-        newBlock.level = 2;
-        newBlock.content = [{ text: "New Section Heading" }];
+        draft.level = 2;
+        draft.content = [{ text: 'New Section Heading' }];
         break;
       case 'paragraph':
-        newBlock.content = [{ text: "New paragraph block text..." }];
+        draft.content = [{ text: 'New paragraph block text...' }];
         break;
       case 'code':
-        newBlock.language = "typescript";
-        newBlock.content = "// Write code here...\nconsole.log('SyncDoc AST');";
+        draft.language = 'typescript';
+        draft.content = "// Write code here...\nconsole.log('SyncDoc AST');";
         break;
       case 'callout':
-        newBlock.variant = "info";
-        newBlock.content = [{ text: "Callout note content..." }];
+        draft.variant = 'info';
+        draft.content = [{ text: 'Callout note content...' }];
         break;
       case 'quote':
-        newBlock.content = [{ text: "Blockquote text..." }];
+        draft.content = [{ text: 'Blockquote text...' }];
         break;
       case 'list':
-        newBlock.listType = "bullet";
-        newBlock.items = ["First item", "Second item"];
+        draft.listType = 'bullet';
+        draft.items = ['First item', 'Second item'];
         break;
       case 'table':
-        newBlock.columns = ["Column A", "Column B"];
-        newBlock.rows = [["Data 1", "Data 2"]];
+        draft.columns = ['Column A', 'Column B'];
+        draft.rows = [['Data 1', 'Data 2']];
         break;
       case 'divider':
       default:
         break;
     }
 
-    const currentBlocks = [...activeDoc.ast.children];
-    let newBlocks = [];
+    try {
+      const order = activeDoc.ast.children.length;
+      const savedBlock = await blockService.create(draft, activeDoc.id, order);
 
-    if (insertAfterId) {
-      const idx = currentBlocks.findIndex(b => b.id === insertAfterId);
-      if (idx >= 0) {
-        currentBlocks.splice(idx + 1, 0, newBlock);
-        newBlocks = currentBlocks;
-      } else {
-        newBlocks = [...currentBlocks, newBlock];
-      }
-    } else {
-      newBlocks = [...currentBlocks, newBlock];
-    }
+      const currentBlocks = [...activeDoc.ast.children];
+      let newBlocks;
 
-    setDocuments(documents.map(doc => {
-      if (doc.id !== activeDocId) return doc;
-      return {
-        ...doc,
-        updatedAt: new Date().toISOString(),
-        ast: {
-          ...doc.ast,
-          version: (doc.ast.version || 1) + 1,
-          children: newBlocks
+      if (insertAfterId) {
+        const idx = currentBlocks.findIndex(b => b.id === insertAfterId);
+        if (idx >= 0) {
+          currentBlocks.splice(idx + 1, 0, savedBlock);
+          newBlocks = currentBlocks;
+        } else {
+          newBlocks = [...currentBlocks, savedBlock];
         }
-      };
-    }));
+      } else {
+        newBlocks = [...currentBlocks, savedBlock];
+      }
 
-    setActiveCursor(newBlock.id, 0);
-    clearSelection();
+      setDocuments(documents.map(doc => {
+        if (doc.id !== activeDocId) return doc;
+        return {
+          ...doc,
+          updatedAt: new Date().toISOString(),
+          ast: { ...doc.ast, version: (doc.ast.version || 1) + 1, children: newBlocks }
+        };
+      }));
+
+      setActiveCursor(savedBlock.id, 0);
+      clearSelection();
+    } catch (err) {
+      setLoadError(err.message || 'Failed to create block');
+    }
   };
 
-  // Conflict Resolution
+  // Conflict Resolution (client-side AST merge demo — the backend doesn't
+  // generate conflict objects; this operates on whatever `.conflict` shape
+  // a block already carries, e.g. from the AST inspector / manual testing).
   const handleResolveConflict = (blockId, resolvedBlockNode) => {
+    const cleanNode = { ...resolvedBlockNode };
+    delete cleanNode.conflict;
+    cleanNode.version = (cleanNode.version || 1) + 1;
+
     setDocuments(documents.map(doc => {
       if (doc.id !== activeDocId) return doc;
 
-      const newChildren = doc.ast.children.map(b => {
-        if (b.id !== blockId) return b;
-
-        // Strip conflict object and set resolved block
-        const cleanNode = { ...resolvedBlockNode };
-        delete cleanNode.conflict;
-        cleanNode.version = (cleanNode.version || 1) + 1;
-        return cleanNode;
-      });
-
-      // Check if any other block still has conflicts
+      const newChildren = doc.ast.children.map(b => (b.id === blockId ? cleanNode : b));
       const remainingConflicts = newChildren.some(b => Boolean(b.conflict));
 
       return {
         ...doc,
         status: remainingConflicts ? 'conflict' : 'synced',
         updatedAt: new Date().toISOString(),
-        ast: {
-          ...doc.ast,
-          version: (doc.ast.version || 1) + 1,
-          children: newChildren
-        }
+        ast: { ...doc.ast, version: (doc.ast.version || 1) + 1, children: newChildren }
       };
     }));
+
+    // Persist the resolved content the same way any other block edit is saved.
+    blockService.update(cleanNode).catch((err) => {
+      console.error('Failed to save resolved block:', err.message);
+    });
 
     setActiveConflictBlock(null);
   };
@@ -411,7 +458,6 @@ function AppWorkspace({ user, onLogout }) {
 
     if (shiftKey) {
       if (!selection) {
-        // No anchor yet — start a new selection at this block
         startSelection(blockId, offset);
       } else {
         extendSelection(blockId, offset);
@@ -421,11 +467,8 @@ function AppWorkspace({ user, onLogout }) {
       setActiveCursor(blockId, offset);
     }
 
-    // Reflect the atomic state in collaborative presence
     const orderedIds = (activeDoc?.ast?.children || []).map(b => b.id);
-    const bounds = shiftKey
-      ? getSelectionBounds(orderedIds)
-      : null;
+    const bounds = shiftKey ? getSelectionBounds(orderedIds) : null;
 
     yjsService.broadcastCursorState({
       cursorBlockId: blockId,
@@ -447,6 +490,15 @@ function AppWorkspace({ user, onLogout }) {
     link.click();
     URL.revokeObjectURL(url);
   };
+
+  if (docsLoading) {
+    return (
+      <div className="oauth-loading">
+        <Loader2 size={22} className="spin" />
+        <span>Loading your documents…</span>
+      </div>
+    );
+  }
 
   return (
     <div className={`sync-app-container ${isDarkMode ? 'dark-mode' : ''}`}>
@@ -478,7 +530,17 @@ function AppWorkspace({ user, onLogout }) {
           </button>
         </div>
 
-        {viewMode === 'grid' ? (
+        {loadError && (
+          <div className="auth-error" role="alert" style={{ margin: '12px 24px' }}>
+            {loadError}
+          </div>
+        )}
+
+        {!activeDoc ? (
+          <div className="oauth-loading">
+            <span>No documents yet — create one to get started.</span>
+          </div>
+        ) : viewMode === 'grid' ? (
           <DocumentGridView
             documents={documents}
             onSelectDoc={(id) => {
@@ -533,30 +595,36 @@ function AppWorkspace({ user, onLogout }) {
               {(viewMode === 'editor' || viewMode === 'split') && (
                 <div className="document-scroll-canvas">
                   <div className="document-paper-sheet">
+                    {docDetailLoading && (
+                      <div className="oauth-loading" style={{ padding: '40px 0' }}>
+                        <Loader2 size={18} className="spin" />
+                        <span>Loading blocks…</span>
+                      </div>
+                    )}
                     {(() => {
                       const orderedIds = (activeDoc?.ast?.children || []).map(b => b.id);
                       const selBounds = getSelectionBounds(orderedIds);
                       return activeDoc?.ast?.children?.map(block => (
-                      <BlockRenderer
-                        key={block.id}
-                        block={block}
-                        selectedBlockId={selectedBlockId}
-                        selectionBlockIds={selBounds?.blockIds || null}
-                        onSelectBlock={handleBlockSelect}
-                        onUpdateBlock={handleUpdateBlock}
-                        onDeleteBlock={handleDeleteBlock}
-                        onMoveUp={(id) => handleMoveBlock(id, 'up')}
-                        onMoveDown={(id) => handleMoveBlock(id, 'down')}
-                        onInsertAfter={(id) => handleAddBlock('paragraph', id)}
-                        onOpenConflict={(b) => setActiveConflictBlock(b)}
-                        onOpenAstInspector={(b) => setInspectedAstBlock(b)}
-                                  presencePeers={presenceUsers}
-                                />
-                                ));
-                              })()}
-                            </div>
-                          </div>
-                        )}
+                        <BlockRenderer
+                          key={block.id}
+                          block={block}
+                          selectedBlockId={selectedBlockId}
+                          selectionBlockIds={selBounds?.blockIds || null}
+                          onSelectBlock={handleBlockSelect}
+                          onUpdateBlock={handleUpdateBlock}
+                          onDeleteBlock={handleDeleteBlock}
+                          onMoveUp={(id) => handleMoveBlock(id, 'up')}
+                          onMoveDown={(id) => handleMoveBlock(id, 'down')}
+                          onInsertAfter={(id) => handleAddBlock('paragraph', id)}
+                          onOpenConflict={(b) => setActiveConflictBlock(b)}
+                          onOpenAstInspector={(b) => setInspectedAstBlock(b)}
+                          presencePeers={presenceUsers}
+                        />
+                      ));
+                    })()}
+                  </div>
+                </div>
+              )}
 
               {/* AST Tree Visualizer Side Panel or Full Panel */}
               {(viewMode === 'split' || viewMode === 'ast-tree') && (
