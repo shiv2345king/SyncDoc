@@ -9,7 +9,10 @@ class YjsCollaborationManager {
     this.presenceListeners = new Set();
     this.docListeners = new Set();
     this.statusListeners = new Set();
+    this.lockListeners = new Set();
     this.status = 'disconnected'; // 'connecting' | 'connected' | 'disconnected'
+    // Active operational block locks map: { [blockId]: LockObject }
+    this.activeLocks = {};
     this.localUser = {
       id: `client-${Math.floor(Math.random() * 10000)}`,
       name: 'Alex Rivers (You)',
@@ -61,6 +64,14 @@ class YjsCollaborationManager {
       yBlocks.observe(() => {
         const blocks = yBlocks.toArray();
         this.notifyDocChange(blocks);
+      });
+
+      // Observe Yjs Operational Locks Map (Matrix Lock Layer)
+      const yLocks = this.ydoc.getMap('operationalLocks');
+      yLocks.observe(() => {
+        const locksObj = yLocks.toJSON();
+        this.activeLocks = locksObj || {};
+        this.notifyLockChange(this.activeLocks);
       });
 
     } catch (err) {
@@ -131,6 +142,63 @@ class YjsCollaborationManager {
     });
   }
 
+  // Operational Block Locking operations
+  acquireBlockLock(blockId) {
+    if (!this.ydoc || !blockId) return false;
+    const yLocks = this.ydoc.getMap('operationalLocks');
+    const existing = yLocks.get(blockId);
+
+    // If lock already held by another client, can't acquire
+    if (existing && existing.holderId !== this.localUser.id && existing.expiresAt > Date.now()) {
+      return false;
+    }
+
+    const lockData = {
+      blockId,
+      holderId: this.localUser.id,
+      holderName: this.localUser.name,
+      holderColor: this.localUser.color,
+      acquiredAt: Date.now(),
+      expiresAt: Date.now() + 30000 // 30s TTL
+    };
+
+    this.ydoc.transact(() => {
+      yLocks.set(blockId, lockData);
+    });
+
+    this.activeLocks[blockId] = lockData;
+    this.notifyLockChange(this.activeLocks);
+    return true;
+  }
+
+  releaseBlockLock(blockId) {
+    if (!this.ydoc || !blockId) return;
+    const yLocks = this.ydoc.getMap('operationalLocks');
+    const existing = yLocks.get(blockId);
+
+    if (existing && existing.holderId === this.localUser.id) {
+      this.ydoc.transact(() => {
+        yLocks.delete(blockId);
+      });
+      delete this.activeLocks[blockId];
+      this.notifyLockChange(this.activeLocks);
+    }
+  }
+
+  isBlockLockedByOther(blockId) {
+    const lock = this.activeLocks[blockId];
+    if (!lock) return false;
+    if (lock.expiresAt && lock.expiresAt < Date.now()) return false;
+    return lock.holderId !== this.localUser.id;
+  }
+
+  getBlockLock(blockId) {
+    const lock = this.activeLocks[blockId];
+    if (!lock) return null;
+    if (lock.expiresAt && lock.expiresAt < Date.now()) return null;
+    return lock;
+  }
+
   // Listener subscriptions
   onStatusChange(listener) {
     this.statusListeners.add(listener);
@@ -147,6 +215,11 @@ class YjsCollaborationManager {
     return () => this.docListeners.delete(listener);
   }
 
+  onLockChange(listener) {
+    this.lockListeners.add(listener);
+    return () => this.lockListeners.delete(listener);
+  }
+
   notifyStatus(status) {
     this.status = status;
     this.statusListeners.forEach(fn => fn(status));
@@ -158,6 +231,10 @@ class YjsCollaborationManager {
 
   notifyDocChange(blocks) {
     this.docListeners.forEach(fn => fn(blocks));
+  }
+
+  notifyLockChange(locks) {
+    this.lockListeners.forEach(fn => fn(locks));
   }
 
   getClientId() {

@@ -74,6 +74,7 @@ function AppWorkspace({ user, onLogout }) {
   // Yjs Collaboration & Presence State
   const [yjsStatus, setYjsStatus] = useState('disconnected');
   const [yjsClientId, setYjsClientId] = useState(0);
+  const [activeLocks, setActiveLocks] = useState({});
   const [presenceUsers, setPresenceUsers] = useState(user ? [{
     id: user.id,
     name: `${user.name} (You)`,
@@ -113,9 +114,14 @@ function AppWorkspace({ user, onLogout }) {
       }
     });
 
+    const unsubLocks = yjsService.onLockChange(locks => {
+      setActiveLocks({ ...locks });
+    });
+
     return () => {
       unsubStatus();
       unsubPresence();
+      unsubLocks();
       yjsService.disconnect();
     };
   }, [activeDocId]);
@@ -235,8 +241,41 @@ function AppWorkspace({ user, onLogout }) {
     }));
   };
 
+  // Localized Operational Block Locking Handler
+  const handleToggleBlockLock = (blockId) => {
+    const isLockedByOther = yjsService.isBlockLockedByOther(blockId);
+    if (isLockedByOther) {
+      return; // Cannot unlock or override someone else's lock
+    }
+
+    const currentLock = yjsService.getBlockLock(blockId);
+    if (currentLock) {
+      yjsService.releaseBlockLock(blockId);
+      setActiveLocks(prev => {
+        const next = { ...prev };
+        delete next[blockId];
+        return next;
+      });
+    } else {
+      yjsService.acquireBlockLock(blockId);
+      setActiveLocks(prev => ({
+        ...prev,
+        [blockId]: {
+          blockId,
+          holderId: user?.id || 'local-user',
+          holderName: user?.name || 'You',
+          holderColor: user?.color || '#6366f1'
+        }
+      }));
+    }
+  };
+
   // Block Level Handlers
   const handleUpdateBlock = (updatedBlock) => {
+    if (yjsService.isBlockLockedByOther(updatedBlock.id)) {
+      console.warn(`Block ${updatedBlock.id} is locked by another peer.`);
+      return;
+    }
     setDocuments(documents.map(doc => {
       if (doc.id !== activeDocId) return doc;
       const newChildren = doc.ast.children.map(blk => {
@@ -256,6 +295,10 @@ function AppWorkspace({ user, onLogout }) {
   };
 
   const handleDeleteBlock = (blockId) => {
+    if (yjsService.isBlockLockedByOther(blockId)) {
+      console.warn(`Cannot delete block ${blockId} because it is locked by another peer.`);
+      return;
+    }
     setDocuments(documents.map(doc => {
       if (doc.id !== activeDocId) return doc;
       const newChildren = doc.ast.children.filter(b => b.id !== blockId);
@@ -521,6 +564,7 @@ function AppWorkspace({ user, onLogout }) {
                 clientId={yjsClientId}
                 presenceUsers={presenceUsers}
                 activeDoc={activeDoc}
+                activeLocks={activeLocks}
                 cursorState={cursor}
                 selectionState={selection ? getSelectionBounds((activeDoc?.ast?.children || []).map(b => b.id)) : null}
                 onSimulatePeer={handleSimulatePeer}
@@ -536,23 +580,30 @@ function AppWorkspace({ user, onLogout }) {
                     {(() => {
                       const orderedIds = (activeDoc?.ast?.children || []).map(b => b.id);
                       const selBounds = getSelectionBounds(orderedIds);
-                      return activeDoc?.ast?.children?.map(block => (
-                      <BlockRenderer
-                        key={block.id}
-                        block={block}
-                        selectedBlockId={selectedBlockId}
-                        selectionBlockIds={selBounds?.blockIds || null}
-                        onSelectBlock={handleBlockSelect}
-                        onUpdateBlock={handleUpdateBlock}
-                        onDeleteBlock={handleDeleteBlock}
-                        onMoveUp={(id) => handleMoveBlock(id, 'up')}
-                        onMoveDown={(id) => handleMoveBlock(id, 'down')}
-                        onInsertAfter={(id) => handleAddBlock('paragraph', id)}
-                        onOpenConflict={(b) => setActiveConflictBlock(b)}
-                        onOpenAstInspector={(b) => setInspectedAstBlock(b)}
-                                  presencePeers={presenceUsers}
-                                />
-                                ));
+                      return activeDoc?.ast?.children?.map(block => {
+                        const lock = activeLocks[block.id] || yjsService.getBlockLock(block.id);
+                        const isLocked = Boolean(lock && lock.holderId !== user?.id);
+                        return (
+                          <BlockRenderer
+                            key={block.id}
+                            block={block}
+                            selectedBlockId={selectedBlockId}
+                            selectionBlockIds={selBounds?.blockIds || null}
+                            isLocked={isLocked}
+                            lockHolder={lock}
+                            onSelectBlock={handleBlockSelect}
+                            onUpdateBlock={handleUpdateBlock}
+                            onDeleteBlock={handleDeleteBlock}
+                            onMoveUp={(id) => handleMoveBlock(id, 'up')}
+                            onMoveDown={(id) => handleMoveBlock(id, 'down')}
+                            onInsertAfter={(id) => handleAddBlock('paragraph', id)}
+                            onOpenConflict={(b) => setActiveConflictBlock(b)}
+                            onOpenAstInspector={(b) => setInspectedAstBlock(b)}
+                            onToggleLock={handleToggleBlockLock}
+                            presencePeers={presenceUsers}
+                          />
+                        );
+                      });
                               })()}
                             </div>
                           </div>

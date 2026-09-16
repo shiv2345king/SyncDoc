@@ -9,7 +9,8 @@ import {
   Check,
   Zap,
   Globe,
-  MousePointer2
+  MousePointer2,
+  Lock
 } from 'lucide-react';
 
 export function CollaborativeStatePanel({
@@ -18,6 +19,7 @@ export function CollaborativeStatePanel({
   clientId,
   presenceUsers,
   activeDoc,
+  activeLocks = {},
   cursorState = { blockId: null, offset: 0 },
   selectionState = null,
   onSimulatePeer,
@@ -26,6 +28,7 @@ export function CollaborativeStatePanel({
   const [isExpanded, setIsExpanded] = useState(true);
 
   const blockCount = activeDoc?.ast?.children?.length || 0;
+  const lockCount = Object.keys(activeLocks || {}).length;
 
   // Selection bounds summary (atomic block state)
   const selectionSummary = selectionState
@@ -82,6 +85,13 @@ export function CollaborativeStatePanel({
               <div className="metric-box">
                 <span className="metric-label">AST Shared Blocks</span>
                 <span className="metric-value highlight">{blockCount} Nodes</span>
+              </div>
+
+              <div className="metric-box">
+                <span className="metric-label">Operational Locks</span>
+                <span className="metric-value code">
+                  <Lock size={11} className="inline-icon text-amber-500" /> {lockCount} Active
+                </span>
               </div>
             </div>
           </div>

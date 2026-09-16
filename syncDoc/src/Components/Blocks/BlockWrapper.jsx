@@ -10,13 +10,17 @@ import {
   Plus,
   Edit3,
   Check,
-  Layers
+  Layers,
+  Lock,
+  Unlock
 } from 'lucide-react';
 
 export function BlockWrapper({
   block,
   isSelected,
   isInSelection = false,
+  isLocked = false,
+  lockHolder = null,
   onSelect,
   onDelete,
   onMoveUp,
@@ -25,6 +29,7 @@ export function BlockWrapper({
   onOpenConflict,
   onOpenAstInspector,
   onUpdateBlock,
+  onToggleLock,
   presencePeers = [],
   children
 }) {
@@ -71,8 +76,11 @@ export function BlockWrapper({
 
   return (
     <div
-      className={`ast-block-wrapper ${isSelected ? 'is-selected' : ''} ${isInSelection ? 'is-in-selection' : ''} ${isCursorActive ? 'has-active-cursor' : ''} ${peerColorList.length > 0 ? 'has-peer-cursor' : ''} ${isConflict ? 'has-conflict' : ''}`}
-      style={peerColorList.length > 0 ? { '--peer-cursor-colors': peerColorList.join(',') } : undefined}
+      className={`ast-block-wrapper ${isSelected ? 'is-selected' : ''} ${isInSelection ? 'is-in-selection' : ''} ${isCursorActive ? 'has-active-cursor' : ''} ${peerColorList.length > 0 ? 'has-peer-cursor' : ''} ${isConflict ? 'has-conflict' : ''} ${isLocked ? 'is-operational-locked' : ''}`}
+      style={{
+        ...(peerColorList.length > 0 ? { '--peer-cursor-colors': peerColorList.join(',') } : {}),
+        ...(isLocked && lockHolder?.holderColor ? { '--lock-holder-color': lockHolder.holderColor } : {})
+      }}
       onClick={(e) => {
         e.stopPropagation();
         onSelect(block.id, {
@@ -161,6 +169,13 @@ export function BlockWrapper({
             <span className="version-pill">v{block.version || 1}</span>
           </div>
 
+          {isLocked && (
+            <div className="operational-lock-pill" title={`Locked by ${lockHolder?.holderName || 'Peer'}`}>
+              <Lock size={12} className="lock-icon" />
+              <span>Locked: {lockHolder?.holderName || 'Peer'}</span>
+            </div>
+          )}
+
           {isConflict && (
             <button
               type="button"
@@ -177,13 +192,28 @@ export function BlockWrapper({
           )}
 
           <div className="block-actions">
+            {onToggleLock && (
+              <button
+                type="button"
+                className={`block-action-btn ${isLocked ? 'locked-btn active' : ''}`}
+                title={isLocked ? `Release operational lock (held by ${lockHolder?.holderName || 'peer'})` : 'Acquire localized operational lock'}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleLock(block.id);
+                }}
+              >
+                {isLocked ? <Lock size={14} /> : <Unlock size={14} />}
+              </button>
+            )}
+
             <button
               type="button"
               className={`block-action-btn ${isEditing ? 'active' : ''}`}
-              title={isEditing ? 'Save block edits' : 'Edit block'}
+              title={isLocked ? 'Block is locked by another peer' : isEditing ? 'Save block edits' : 'Edit block'}
+              disabled={isLocked}
               onClick={(e) => {
                 e.stopPropagation();
-                setIsEditing(!isEditing);
+                if (!isLocked) setIsEditing(!isEditing);
               }}
             >
               {isEditing ? <Check size={14} /> : <Edit3 size={14} />}

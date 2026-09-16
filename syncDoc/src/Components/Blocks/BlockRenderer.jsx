@@ -12,6 +12,8 @@ export function BlockRenderer({
   block,
   selectedBlockId,
   selectionBlockIds = null,
+  isLocked = false,
+  lockHolder = null,
   onSelectBlock,
   onUpdateBlock,
   onDeleteBlock,
@@ -20,6 +22,7 @@ export function BlockRenderer({
   onInsertAfter,
   onOpenConflict,
   onOpenAstInspector,
+  onToggleLock,
   presencePeers = []
 }) {
   const isSelected = selectedBlockId === block.id;
@@ -64,6 +67,8 @@ export function BlockRenderer({
       block={block}
       isSelected={isSelected}
       isInSelection={Boolean(selectionBlockIds?.includes(block.id))}
+      isLocked={isLocked}
+      lockHolder={lockHolder}
       onSelect={onSelectBlock}
       onDelete={onDeleteBlock}
       onMoveUp={onMoveUp}
@@ -72,6 +77,7 @@ export function BlockRenderer({
       onOpenConflict={onOpenConflict}
       onOpenAstInspector={onOpenAstInspector}
       onUpdateBlock={onUpdateBlock}
+      onToggleLock={onToggleLock}
       presencePeers={presencePeers}
     >
       {renderBlockContent()}
