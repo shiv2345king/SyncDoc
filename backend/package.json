@@ -1,0 +1,19 @@
+{
+  "name": "syncdoc-backend",
+  "version": "1.0.0",
+  "description": "SyncDoc backend engine with nested AST MongoDB schemas and recursive relationship tracing hooks",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test test/**/*.test.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "lib0": "^0.2.117",
+    "mongoose": "^8.9.5",
+    "ws": "^8.21.3",
+    "y-websocket": "^3.1.0",
+    "yjs": "^13.6.32"
+  }
+}
